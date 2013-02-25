@@ -241,6 +241,10 @@ exports.create = function() {
          * Destroys.
          */
         destroy: function() {
+            if(!initialized) {
+                return;
+            }
+
             initialized = false;
             page.close();
             page = null;

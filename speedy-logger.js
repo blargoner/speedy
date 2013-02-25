@@ -10,29 +10,41 @@
  * @copyright Copyright (c) 2013 John Peloquin. All rights reserved.
  */
 
-var system = require('system'),
-    logger = require('./modules/speedy-logger.js').create();
+/**
+ * Modules
+ */
+var System = require('system'),
+    Filesystem = require('fs'),
+    Speedy = require('./modules/speedy-looper.js');
 
-var args = system.args;
+/**
+ * Variables
+ */
+var args = System.args,
+    delay,
+    file,
+    stream,
+    speedy;
 
-if(args.length !== 3) {
-    console.log('Usage: phantomjs speedy-logger.js [interval (minutes)] [log file]');
-    phantom.exit();
-}
+/**
+ * Functions
+ */
+var _log = function(data) {
+    var download = data.download;
+    stream.writeLine([download.time.toString(), download.speed.toFixed(2)].join(','));
+    stream.flush();
+};
 
 var _onInitSuccess = function() {
-    var file = args[2],
-        delay = parseInt(args[1], 10) * 60 * 1000;
-
     console.log('Successfully initialized.');
     console.log('Starting testing...');
-    logger.start(file, delay, _onTestStart, _onTestSuccess, _onTestError);
+    speedy.start(delay, _onTestStart, _onTestSuccess, _onTestError);
 };
 
 var _onInitError = function(code) {
     console.error('Error initializing.');
     console.log('Exiting...');
-    logger.destroy();
+    speedy.destroy();
     phantom.exit();
 };
 
@@ -41,6 +53,7 @@ var _onTestStart = function() {
 };
 
 var _onTestSuccess = function(data) {
+    _log(data);
     console.log('Successfully tested.');
     console.log('Logged download speed to file: ' + data.download.speed.toFixed(2) + 'Mbps');
     console.log('Continuing testing...');
@@ -51,5 +64,24 @@ var _onTestError = function(code) {
     console.log('Continuing testing...');
 };
 
+/**
+ * Main
+ */
+if(args.length !== 3) {
+    console.log('Usage: phantomjs speedy-logger.js [interval (minutes)] [log file]');
+    phantom.exit();
+}
+
 console.log('Initializing...');
-logger.initialize(_onInitSuccess, _onInitError);
+
+delay = parseInt(args[1], 10) * 60 * 1000;
+file = args[2];
+stream = Filesystem.open(file, 'a');
+
+if(!stream) {
+    console.error('Error opening log file.');
+    phantom.exit();
+}
+
+speedy = Speedy.create();
+speedy.initialize(_onInitSuccess, _onInitError);
