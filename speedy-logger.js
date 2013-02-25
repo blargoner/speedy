@@ -4,7 +4,7 @@
  * This script measures the speed of an internet connection at regular intervals
  * and logs the measurements to a file.
  *
- * Usage: phantomjs speedy-logger.js [interval in minutes] [log file path]
+ * Usage: phantomjs speedy-logger.js [interval (minutes)] [log file path]
  *
  * @author John Peloquin
  * @copyright Copyright (c) 2013 John Peloquin. All rights reserved.
@@ -45,6 +45,9 @@ var _onInitError = function(code) {
     console.error('Error initializing.');
     console.log('Exiting...');
     speedy.destroy();
+    speedy = null;
+    stream.close();
+    stream = null;
     phantom.exit();
 };
 
@@ -55,7 +58,7 @@ var _onTestStart = function() {
 var _onTestSuccess = function(data) {
     _log(data);
     console.log('Successfully tested.');
-    console.log('Logged download speed to file: ' + data.download.speed.toFixed(2) + 'Mbps');
+    console.log('Logged test results to file: ' + data.download.speed.toFixed(2) + 'Mbps download');
     console.log('Continuing testing...');
 };
 
