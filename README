@@ -1,13 +1,9 @@
 Speedy
 Copyright (c) 2013 John Peloquin. All rights reserved.
 
-Speedy measures the speed of an internet connection at regular intervals and
-logs the measurements to a file. It is useful for keeping internet service
-providers honest.
+Speedy measures the speed of an internet connection. It is useful for keeping internet service providers honest.
 
 Requirements: phantomjs
-
-Usage: phantomjs speedy.js [interval (minutes)] [download test log file]
 
 Speedy uses the SpeedOf.Me service for speed testing.
 

@@ -8,95 +8,35 @@
 /**
  * Constants
  */
-
 var SPEED_OF_ME = 'http://speedof.me';
 
-var TEST_INTERVAL_MIN = 1 * 60 * 1000;
+var TIMEOUT_DEFAULT = 60 * 1000;
 
-var POLLING_INTERVAL = 1 * 1000,
-    POLLING_LIMIT = 60;
+var POLL_DELAY = 1000;
 
-var STATUS_ACCESSING            = 'Accessing speed test service...',
-    STATUS_STARTING_TESTS       = 'Starting tests (will run until interrupted)...',
-    STATUS_STARTING_TEST        = 'Starting test...',
-    STATUS_POLLING              = 'Waiting for test results...',
-    STATUS_LOGGED               = 'Logged test results.';
-
-var ERROR                       = 'Error: ',
-    ERROR_TEST_INTERVAL_MIN     = 'Test interval too small.',
-    ERROR_TEST_SERVICE_FAIL     = 'Unable to access speed test service.',
-    ERROR_DOWNLOAD_FILE_FAIL    = 'Unable to access download log file.',
-    ERROR_DOWNLOAD_HISTORY      = 'Invalid download test results.',
-    ERROR_POLLING_LIMIT         = 'Timed out waiting for test results.';
+var ERROR_REENTRY       = 'reentry',
+    ERROR_SERVICE       = 'service',
+    ERROR_DATA          = 'data',
+    ERROR_TIMEOUT       = 'timeout';
 
 /**
  * Modules
  */
-var fs = require('fs'),
-    webpage = require('webpage');
+var Webpage = require('webpage');
 
 /**
- * Prints a message to the console.
+ * Starts speed test on page.
  *
- * @param {String} message message
+ * @param {Object} page page object
  */
-var _print = function(message) {
-    console.log(message);
+var _startPageTest = function(page) {
+    page.evaluate(function() {
+        startTest();
+    });
 };
 
 /**
- * Prints an errror message to the console.
- *
- * @param {String} message error message
- */
-var _error = function(message) {
-    console.error(ERROR + message);
-};
-
-/**
- * Prints an error message to the console and exits.
- *
- * @param {String} message error message
- */
-var _die = function(message) {
-    _error(message);
-    phantom.exit();
-};
-
-/**
- * Determines whether data point history changed.
- *
- * @param {Object} old old history
- * @param {Object} now current history
- * @return {Boolean} true if changed, false otherwise
- */
-var _changed = function(old, now) {
-    return (old.length === 1 && now.length === 1 && old[0][1] === 0 && now[0][1] !== 0) || old.length !== now.length;
-};
-
-/**
- * Logs a data point to a file stream.
- *
- * Each data point is logged as a line of text in the following form:
- *
- * t_i,s_i
- *
- * where t_i is a timestamp (as an integer number of milliseconds since the epoch)
- * and s_i is the measured speed at t_i in Mbps.
- *
- * @param {Object} stream steam
- * @param {Array} point data point
- */
-var _log = function(stream, point) {
-    var timestamp = point[0].toString(),
-        speed = point[1].toFixed(2);
-
-    stream.writeLine([timestamp, speed].join(','));
-    stream.flush();
-};
-
-/**
- * Gets download speed test history on page.
+ * Gets download speed test history from page.
  *
  * The returned array has structure [..., [t_i, s_i], ...], where for each i,
  * t_i is a timestamp (as an integer number of milliseconds since the epoch) and
@@ -106,117 +46,204 @@ var _log = function(stream, point) {
  * @return {Array} downstream speed test history
  */
 var _getPageDownloadHistory = function(page) {
-    return page.evaluate(function() {
+    return page.evaluate(function () {
         return downloadHistory;
     });
 };
 
 /**
- * Starts speed test on page.
+ * Determines whether there is new test history data.
  *
- * @param {Object} page page object
+ * @param {Object} oldHistory old history
+ * @param {Object} newHistory current history
+ * @return {Boolean} true if there is new history, false otherwise
  */
-var _startPageTest = function(page) {
-    _print(STATUS_STARTING_TEST);
-
-    page.evaluate(function() {
-        startTest();
-    });
+var _isNewHistory = function(oldHistory, newHistory) {
+    return (oldHistory.length === 1 && newHistory.length === 1
+            && oldHistory[0][1] === 0 && newHistory[0][1] !== 0)
+            || oldHistory.length < newHistory.length;
 };
 
-/**
- * Starts speed tests on a page.
- *
- * @param {Object} page page object
- * @param {Integer} interval interval (ms)
- * @param {Object} downStream download log file stream
- */
-var _startPageTests = function(page, interval, downStream) {
-    _print(STATUS_STARTING_TESTS);
+exports.create = function() {
+    /**
+     * Variables
+     */
+    var initializing = false,
+        initialized = false,
+        testing = false,
+        page = null;
 
-    var downloadHistory = _getPageDownloadHistory(page);
+    return {
+        /**
+         * Method reentry.
+         */
+        ERROR_REENTRY:      ERROR_REENTRY,
 
-    if(!downloadHistory) {
-        _die(ERROR_DOWNLOAD_HISTORY);
-    }
+        /**
+         * Unable to connect to test service.
+         */
+        ERROR_SERVICE:      ERROR_SERVICE,
 
-    (function test() {
-        var pollCount = 0;
+        /**
+         * Unable to obtain test results data.
+         */
+        ERROR_DATA:         ERROR_DATA,
 
-        _startPageTest(page);
+        /**
+         * Unable to obtain test results data in time.
+         */
+        ERROR_TIMEOUT:      ERROR_TIMEOUT,
 
-        _print(STATUS_POLLING);
-
-        (function poll() {
-            var downloadHistoryNow = _getPageDownloadHistory(page);
-
-            if(!downloadHistoryNow || downloadHistoryNow.length < downloadHistory.length) {
-                _die(ERROR_DOWNLOAD_HISTORY);
-            }
-
-            if(_changed(downloadHistory, downloadHistoryNow)) {
-                downloadHistory = downloadHistoryNow;
-
-                _log(downStream, downloadHistory[downloadHistory.length - 1]);
-                _print(STATUS_LOGGED);
-
+        /**
+         * Initializes.
+         *
+         * Initialization is asynchronous. On success, the success callback will
+         * be called. On error, the error callback will be called with an error
+         * code.
+         *
+         * @param {Function} success success callback
+         * @param {Function} error error callback
+         */
+        initialize: function(success, error) {
+            if(initializing || initialized) {
+                error(this.ERROR_REENTRY);
                 return;
             }
 
-            pollCount++;
-            if(pollCount >= POLLING_LIMIT) {
-                _error(ERROR_POLLING_LIMIT);
+            initializing = true;
+            page = Webpage.create();
+            page.onError = function() {};
+
+            page.open(SPEED_OF_ME, function(status) {
+                if(status === 'success') {
+                    initialized = true;
+                    initializing = false;
+                    success();
+                }
+                else {
+                    initializing = false;
+                    error(this.ERROR_SERVICE);
+                }
+           });
+        },
+
+        /**
+         * Gets initializing state.
+         *
+         * @return {Boolean} whether initializing
+         */
+        initializing: function() {
+            return initializing;
+        },
+
+        /**
+         * Gets initialized state.
+         *
+         * @return {Boolean} whether initialized
+         */
+        initialized: function() {
+            return initialized;
+        },
+
+        /**
+         * Runs a speed test.
+         *
+         * Testing is asynchronous. On success, the success callback will be called
+         * with the test results. On error, the error callback will be called with
+         * an error code.
+         *
+         * Test results are provided in an object of the following form:
+         *
+         * {
+         *     download: {              // download test results
+         *         time: t_i            // time (integer milliseconds since epoch)
+         *         speed: s_i           // speed (float Mbps)
+         *     }
+         * }
+         *
+         * At most one test can be run at a time.
+         *
+         * @param {Function} success success callback
+         * @param {Function} error error callback
+         * @param {Number} timeout timeout (milliseconds, default 60 seconds)
+         */
+        test: function(success, error, timeout) {
+            var start,
+                downloadHistory;
+
+            if(!initialized || testing) {
+                error(this.ERROR_REENTRY);
                 return;
             }
 
-            setTimeout(poll, POLLING_INTERVAL);
+            if(timeout === undefined) {
+                timeout = TIMEOUT_DEFAULT;
+            }
 
-        }());
+            testing = true;
+            start = Date.now();
+            downloadHistory = _getPageDownloadHistory(page);
 
-        setTimeout(test, interval);
+            if(!downloadHistory) {
+                testing = false;
+                error(this.ERROR_DATA);
+                return;
+            }
 
-    }());
-};
+            _startPageTest(page);
 
-/**
- * Starts speed tests.
- *
- * @param {Integer} interval interval (ms)
- * @param {String} downFile download log file
- */
-var _start = function(interval, downFile) {
-    var page, downStream;
+            setTimeout(function poll() {
+                var now = Date.now(),
+                    downloadHistoryNow = _getPageDownloadHistory(page),
+                    data;
 
-    if(interval < TEST_INTERVAL_MIN) {
-        _die(ERROR_TEST_INTERVAL_MIN);
-    }
+                if(!downloadHistoryNow) {
+                    testing = false;
+                    error(this.ERROR_DATA);
+                    return;
+                }
 
-    downStream = fs.open(downFile, 'a');
-    if(!downStream) {
-        _die(ERROR_DOWNLOAD_FILE_FAIL);
-    }
+                if(_isNewHistory(downloadHistory, downloadHistoryNow)) {
+                    data = downloadHistoryNow[downloadHistoryNow.length - 1];
+                    testing = false;
 
-    _print(STATUS_ACCESSING);
+                    success({
+                        download: {
+                            time: data[0],
+                            speed: data[1]
+                        }
+                    });
 
-    page = webpage.create();
+                    return;
+                }
 
-    page.onError = function() {};
+                if(now - start >= timeout) {
+                    testing = false;
+                    error(this.ERROR_TIMEOUT);
+                    return;
+                }
 
-    page.open(SPEED_OF_ME, function(status) {
-        if(status !== 'success') {
-            _die(ERROR_TEST_SERVICE_FAIL);
+                setTimeout(poll, POLL_DELAY);
+
+            }, POLL_DELAY);
+        },
+
+        /**
+         * Gets testing state.
+         *
+         * @return {Boolean} whether testing
+         */
+        testing: function() {
+            return testing;
+        },
+
+        /**
+         * Destroys.
+         */
+        destroy: function() {
+            initialized = false;
+            page.close();
+            page = null;
         }
-
-        _startPageTests(page, interval, downStream);
-    });
-};
-
-/**
- * Starts speed tests.
- *
- * @param {Integer} interval interval (minutes)
- * @param {String} downFile download log file
- */
-exports.start = function(interval, downFile) {
-    _start(60 * 1000 * interval, downFile);
+    };
 };
