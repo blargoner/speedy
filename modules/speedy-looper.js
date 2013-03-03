@@ -16,6 +16,7 @@ exports.create = function() {
      */
     var speedy = Speedy.create(),
         looper = Object.create(speedy),
+        looping = false,
         id = null;
 
     /**
@@ -41,14 +42,26 @@ exports.create = function() {
     looper.start = function(delay, start, success, error, timeout) {
         var that = this;
 
-        if(id !== null) {
+        if(looping) {
             error(this.ERROR_REENTRY);
         }
 
-        id = setInterval(function() {
+        looping = true;
+
+        (function test() {
             start();
             that.test(success, error, timeout);
-        }, delay);
+            id = setTimeout(test, delay);
+        }());
+    };
+
+    /**
+     * Gets looping state.
+     *
+     * @return {Boolean} whether looping
+     */
+    looper.looping = function() {
+        return looping;
     };
 
     /**
@@ -56,20 +69,19 @@ exports.create = function() {
      *
      * @return {Boolean} whether started
      */
-    looper.started = function() {
-        return (id !== null);
-    };
+    looper.started = looper.looping;
 
     /**
      * Stops a sequence of speed tests.
      */
     looper.stop = function() {
-        if(id === null) {
+        if(!looping) {
             return;
         }
 
-        clearInterval(id);
+        clearTimeout(id);
         id = null;
+        looping = false;
     };
 
     /**
