@@ -105,6 +105,8 @@ exports.create = function() {
          * @param {Function} error error callback
          */
         initialize: function(success, error) {
+            var that = this;
+
             if(initializing || initialized) {
                 error(this.ERROR_REENTRY);
                 return;
@@ -122,7 +124,7 @@ exports.create = function() {
                 }
                 else {
                     initializing = false;
-                    error(this.ERROR_SERVICE);
+                    error(that.ERROR_SERVICE);
                 }
            });
         },
@@ -168,7 +170,8 @@ exports.create = function() {
          * @param {Number} timeout timeout (milliseconds, default 60 seconds)
          */
         test: function(success, error, timeout) {
-            var start,
+            var that = this,
+                start,
                 downloadHistory;
 
             if(!initialized || testing) {
@@ -199,7 +202,7 @@ exports.create = function() {
 
                 if(!downloadHistoryNow) {
                     testing = false;
-                    error(this.ERROR_DATA);
+                    error(that.ERROR_DATA);
                     return;
                 }
 
@@ -219,7 +222,7 @@ exports.create = function() {
 
                 if(now - start >= timeout) {
                     testing = false;
-                    error(this.ERROR_TIMEOUT);
+                    error(that.ERROR_TIMEOUT);
                     return;
                 }
 
