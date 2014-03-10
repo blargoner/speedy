@@ -10,6 +10,8 @@
  */
 var SPEED_OF_ME = 'http://speedof.me';
 
+var USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/534.34 (KHTML, like Gecko) PhantomJS/1.9.7 Safari/534.34';
+
 var TIMEOUT_DEFAULT = 60 * 1000;
 
 var POLL_DELAY = 1000;
@@ -114,6 +116,7 @@ exports.create = function() {
 
             initializing = true;
             page = Webpage.create();
+            page.settings.userAgent = USER_AGENT;
             page.onError = function() {};
 
             page.open(SPEED_OF_ME, function(status) {
